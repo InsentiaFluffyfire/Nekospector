@@ -19,7 +19,7 @@ static u32 AppendCString(char* dst, const char* src) {
 	return(length);
 }
 
-static u32 R32ToChars(char* dst, const r32 number, const u32 decimals) {
+static u32 r32ToChars(char* dst, const r32 number, const u32 decimals) {
 	static const r64 multiplier[] = {1,10,100,1000,10000,100000};
 
 	const u32 tempDecimals = MinU32(decimals, MAX_FLOAT_DECIMALS);
@@ -42,7 +42,7 @@ static u32 R32ToChars(char* dst, const r32 number, const u32 decimals) {
 	return(length);
 }
 
-static u32 S64ToChars(char* dst, const s64 number) {
+static u32 s64ToChars(char* dst, const s64 number) {
 	u64 tempNumber = number;
 	const u32 negative = (number < 0);
 	const u32 length = f_Log10(tempNumber)+negative;
@@ -59,7 +59,7 @@ static u32 S64ToChars(char* dst, const s64 number) {
 	return(length);
 }
 
-static u32 U64ToChars(char* dst, const u64 number) {
+static u32 u64ToChars(char* dst, const u64 number) {
 	u64 tempNumber = number;
 	const u32 length = f_Log10(tempNumber);
 	u32 index = length-1;

@@ -10,7 +10,6 @@
 #define VOID_FNC_POINTER(name) void name(void)
 typedef	VOID_FNC_POINTER(voidFnc);
 
-
 typedef signed char s8;
 typedef short s16;
 typedef int s32;

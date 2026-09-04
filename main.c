@@ -1,3 +1,10 @@
+//TODO:
+// - proper handling of arrays,
+// - proper handling of strings,
+// - proper printing of enum Definitions in the file
+
+
+
 #include "Introspect.h"
 
 #include "typedefs.h"
@@ -11,7 +18,6 @@
 
 #define typePrefix "IntroDataType"
 #define tabSize 8
-#define enumFileName "IntroDataType.h"
 #define outputFileName "IntrospectionData.h"
 
 const char* basicTypeNames[] = { "char", "bool", "memIndex", "b32", "b64", "u8", "u16", "u32", "u64", "s8", "s16", "s32", "s64", "r32", "r64"};
@@ -102,28 +108,33 @@ typedef enum ModeFlagBits {
 	MODE_BIT_TUPPLE			= 0x4,
 }ModeFlagBits;
 
+typedef struct StructData {
+	Token typeToken;
+	u32 start;
+	u32 end;
+	ModeFlagBits flags;
+} StructData;
+
+#define maxStructCount 256u
+
 typedef struct MemberData{
 	Token typeToken;
 	Token identifierToken;
+	bool hasTypeToken;
+	bool hasIdentifierToken;
 	u32 arraySize;
 	MemberFlagBits flags;
 }MemberData;
 
 typedef struct StructParser {
 	u32 braceCount;
-	u32 arraySize;
-	Token typeToken;
-	Token identifierToken;
 	FILE* outputFile;
-	bool hasTypeToken;
-	bool hasIdentifierToken;
-	MemberFlagBits flags;
-	u8 memberCount;
+	u16 structCount;
+	u16 memberCount;
 	u32 maxTypeLength;
 	u32 maxIdentifierLength;
 	u32 maxArrayCountLength;
-	Token structToken;
-	ModeFlagBits modeFlags;
+	StructData structs[maxStructCount];
 	MemberData members[maxMemberCount];
 }StructParser;
 
@@ -145,16 +156,14 @@ typedef struct EnumParser {
 
 EnumParser enumParser;
 
-static void initStructParser() {
-	structParser->braceCount = 1;
-	structParser->arraySize = 1;
-	structParser->hasTypeToken = false;
-	structParser->typeToken = (Token){ 0 };
-	structParser->hasIdentifierToken = false;
-	structParser->identifierToken = (Token){0};
-	structParser->flags = MEMBER_FLAG_BIT_NONE;
-	structParser->modeFlags = MODE_BIT_NONE;
-}
+typedef struct FileResults {
+	u16 structStart;
+	u16 structEnd;
+	u16 enumStart;
+	u16 enumEnd;
+}FileResults;
+
+FileResults parsingResults[maxFiles];
 
 static void setOutputFile(FILE* file) {
 	structParser->outputFile = file;
@@ -186,7 +195,6 @@ static inline bool isDigit(const char c) {
 	return(result);
 }
 
-//gets rid of white Space and comments
 static void eatAllDeadSpace() {
 	for (;;) {
 		if (isWhiteSpace(tokenizer.at[0])) {
@@ -317,7 +325,7 @@ static bool parseModeParameter() {
 	Token token = getToken();
 	if (token.type == Token_String) {
 		if (compareIdentifier(token, "tupple")) {
-			structParser->modeFlags |= MODE_BIT_TUPPLE;
+			structParser->structs[structParser->structCount].flags |= MODE_BIT_TUPPLE;
 		}
 		return(parseModeParameter());
 	}
@@ -344,7 +352,6 @@ static void parseIntrospectionParams() {
 			default: { parseIntrospectionParams(); }break;
 		}
 }
-
 
 #define maxNameLength 127
 typedef struct EnumValue {
@@ -397,8 +404,6 @@ static void pushEnumValue(Token t, bool isEnum) {
 }
 
 static void writeEnumFile(FILE* file) {
-	fprintf(file, "#pragma once\n\n");
-
 	fprintf(file, "typedef enum IntroDataType {\n");
 	for (u32 e = 0; e< currentEnumValues; ++e) {
 		writeEnumValue(file, enumValues[e]);
@@ -406,33 +411,22 @@ static void writeEnumFile(FILE* file) {
 	for (u32 e = 0; e< currentEnumValuesE; ++e) {
 		writeEnumValue(file, enumValuesE[e]);
 	}
-	fprintf(file, "} IntroDataType;\n");
-	fclose(file);
+	fprintf(file, "} IntroDataType;\n\n");
 }
 
 static void parseMember() {
 	Token token = getToken();
 	switch (token.type) {
 		case Token_Semicolon: {
-			if (structParser->hasIdentifierToken&& structParser->hasTypeToken) {
-				if ((structParser->arraySize > 1)&&(structParser->modeFlags&MODE_BIT_TUPPLE)) {
-					structParser->flags |= MEMBER_FLAG_BIT_TUPPLE;
+			if (structParser->members[structParser->memberCount].hasIdentifierToken&& structParser->members[structParser->memberCount].hasTypeToken) {
+				if ((structParser->members[structParser->memberCount].arraySize > 1)&&(structParser->structs[structParser->structCount].flags&MODE_BIT_TUPPLE)) {
+					structParser->members[structParser->memberCount].flags |= MEMBER_FLAG_BIT_TUPPLE;
 				}
-				structParser->members[structParser->memberCount] = (MemberData){
-				  .arraySize			= structParser->arraySize,
-				  .flags				= structParser->flags,
-				  .typeToken			= structParser->typeToken,
-				  .identifierToken		= structParser->identifierToken,
-				};
-				pushEnumValue(structParser->typeToken, (structParser->flags & MEMBER_FLAG_BIT_ENUM) ? true : false);
-				structParser->flags = MEMBER_FLAG_BIT_NONE;
+				pushEnumValue(structParser->members[structParser->memberCount].typeToken, (structParser->members[structParser->memberCount].flags & MEMBER_FLAG_BIT_ENUM) ? true : false);
+				structParser->maxArrayCountLength = maxU32(structParser->maxArrayCountLength, f_Log10(structParser->members[structParser->memberCount].arraySize));
+				structParser->maxIdentifierLength = maxU32(structParser->maxIdentifierLength, structParser->members[structParser->memberCount].identifierToken.length);
+				structParser->maxTypeLength = maxU32(structParser->maxTypeLength, structParser->members[structParser->memberCount].typeToken.length);
 				++structParser->memberCount;
-				structParser->maxArrayCountLength = maxU32(structParser->maxArrayCountLength, f_Log10(structParser->arraySize));
-				structParser->maxIdentifierLength = maxU32(structParser->maxIdentifierLength, structParser->identifierToken.length);
-				structParser->maxTypeLength = maxU32(structParser->maxTypeLength, structParser->typeToken.length);
-				structParser->arraySize = 1;
-				structParser->hasTypeToken = false;
-				structParser->hasIdentifierToken = false;
 			}
 		} break;
 		case Token_FileEnd: {
@@ -448,23 +442,23 @@ static void parseMember() {
 		}break;
 		case Token_BracketOpen: {
 			token = getToken();
-			if (token.type == Token_Number) { structParser->arraySize *= tokenToU32(token); } //doesn't work with constants yet
+			if (token.type == Token_Number) { /*structParser->arraySize *= tokenToU32(token);*/ } //doesn't work with constants yet
 			if (!requiredToken(Token_BracketClose)) { fprintf(stderr, "Error: Invalid Array Syntax!\n\n"); }
 			parseMember();
 		}break;
 		case Token_Asterisk: {
-			structParser->flags |= MEMBER_FLAG_BIT_PTR;
+			structParser->members[structParser->memberCount].flags |= MEMBER_FLAG_BIT_PTR;
 			parseMember();
 		}break;
 		case Token_Identifier: {
 			if (!compareIdentifier(token, "struct")&&!compareIdentifier(token, "union")) {
-				if (structParser->hasTypeToken) {
-					structParser->identifierToken = token; structParser->hasIdentifierToken = true;
+				if (structParser->members[structParser->memberCount].hasTypeToken) {
+					structParser->members[structParser->memberCount].identifierToken = token; structParser->members[structParser->memberCount].hasIdentifierToken = true;
 				} else {
 					if (compareIdentifier(token, "enum")) {
-						structParser->flags |= MEMBER_FLAG_BIT_ENUM;
+						structParser->members[structParser->memberCount].flags |= MEMBER_FLAG_BIT_ENUM;
 					} else {
-						structParser->typeToken = token; structParser->hasTypeToken = true;
+						structParser->members[structParser->memberCount].typeToken = token; structParser->members[structParser->memberCount].hasTypeToken = true;
 					}
 				}
 			}
@@ -476,7 +470,7 @@ static void parseMember() {
 	}
 }
 
-static void writeMemberData(FILE* file, MemberData member) {
+static void writeMemberData(FILE* file, MemberData member, StructData structData) {
 	fprintf(file, "\t{%s_%.*s,", typePrefix, member.typeToken.length, member.typeToken.text);
 	for (u32 c = 0; c < maxU32(structParser->maxTypeLength, tabSize)-member.typeToken.length; ++c) {
 		fprintf(file, " ");
@@ -489,33 +483,34 @@ static void writeMemberData(FILE* file, MemberData member) {
 	for (u32 c = 0; c < maxU32(structParser->maxArrayCountLength, tabSize)-f_Log10(member.arraySize); ++c) {
 		fprintf(file, " ");
 	}
-	fprintf(file, " offsetof(%.*s, %.*s),", structParser->structToken.length, structParser->structToken.text, member.identifierToken.length, member.identifierToken.text );
+	fprintf(file, " offsetof(%.*s, %.*s),", structData.typeToken.length, structData.typeToken.text, member.identifierToken.length, member.identifierToken.text);
 	for (u32 c = 0; c < maxU32(structParser->maxIdentifierLength, tabSize)-member.identifierToken.length; ++c) {
 		fprintf(file, " ");
 	}
 	fprintf(file, " 0x%x },\n", member.flags);
 }
 
+static void writeStruct(FILE* file, StructData structData) {
+	fprintf(structParser->outputFile, "MemberDefinition membersOf_%.*s[] = {\n", structData.typeToken.length, structData.typeToken.text);
+	for (u32 i = structData.start; i < structData.end; ++i) {
+		writeMemberData(file, structParser->members[i], structData);
+	}
+	fprintf(structParser->outputFile, "};\n\n");
+}
+
 static void parseStruct() {
-	structParser->structToken = getToken();
-	pushEnumValue(structParser->structToken, false);
-	fprintf(structParser->outputFile,"MemberDefinition membersOf_%.*s[] = {\n", structParser->structToken.length, structParser->structToken.text);
+	structParser->structs[structParser->structCount].typeToken = getToken();
+	structParser->structs[structParser->structCount].start = structParser->memberCount;
+	pushEnumValue(structParser->structs[structParser->structCount].typeToken, false);
 	if (requiredToken(Token_BraceOpen)) {
 		structParser->braceCount = 1;
 		while (structParser->braceCount) {
 			parseMember();
 		}
-		
 	}
-	for (u32 m = 0; m<structParser->memberCount; ++m) {
-		writeMemberData(structParser->outputFile, structParser->members[m]);
-	}
-	initStructParser();
-	structParser->maxArrayCountLength = 1;
-	structParser->maxIdentifierLength = 0;
-	structParser->maxTypeLength = 0;
-	structParser->memberCount = 0;
-	fprintf(structParser->outputFile, "};\n\n");
+	structParser->structs[structParser->structCount].end = structParser->memberCount;
+	++structParser->structCount;
+
 }
 
 static void parseEnumerator() {
@@ -589,10 +584,6 @@ static void parseEnum() {
 static void parseIntrospectable() {
 	if (requiredToken(Token_ParenOpen)) {
 		parseIntrospectionParams();
-		structParser->memberCount = 0;
-		structParser->maxArrayCountLength = 1;
-		structParser->maxIdentifierLength = 0;
-		structParser->maxTypeLength = 0;
 		Token token = getToken();
 		if (compareIdentifier(token, "typedef")) { token = getToken(); }
 		if (compareIdentifier(token, "struct")) {
@@ -608,10 +599,6 @@ static void parseIntrospectable() {
 		fprintf(stderr, "Error: Expecting '(' Token!\n");
 	}
 }
-
-//TODO:
-// - proper handling of arrays,
-// - proper handling of strings,
 
 static void writeEnumeratorHelperFunction(FILE* file) {
 	fprintf(file, "static const char* findEnumString_(EnumeratorDefinition* enumDefinition, u32 size, s32* value);\n");
@@ -662,14 +649,12 @@ static void writeFormatingFunction(FILE* file) {
 	fprintf(file, "}\n");
 }
 
-
 static void printFileHeader(FILE* file) {
 	fprintf(file, "#pragma once\n\n");
 	fprintf(file, "#include \"typedefs.h\"\n");
 	fprintf(file, "#include \"utility.h\"\n");
 	fprintf(file, "#include \"fstring.h\"\n");
 	fprintf(file, "#include \"platformMemory.h\"\n\n");
-	fprintf(file, "#include \"%s\"\n\n", enumFileName);
 };
 static void printMemberDefintion(FILE* file) {
 	fprintf(file, "typedef enum MemberFlagBits {\n");
@@ -713,11 +698,11 @@ int main(int argCount, char** args)
 	LARGE_INTEGER clockFrequency;
 	QueryPerformanceFrequency(&clockFrequency);
 	char* outFileName = outputFileName;
-	char* outEnumFileName = enumFileName;
 	char outFileDirectory[MAX_PATH];
 	memset(outFileDirectory, 0, MAX_PATH);
 	u32 outPathLength = 0;
 	structParser = malloc(sizeof(StructParser));
+	memset(structParser, 0, sizeof(StructParser));
 	if (argCount>1) {
 		CurrentArgType argType = ArgType_None;
 		for (u32 a = 1; a < argCount; ++a) {
@@ -765,23 +750,17 @@ int main(int argCount, char** args)
 	};
 	AppendCString(&outFileDirectory[outPathLength], outFileName);
 	FILE* outputFile = fopen(outFileDirectory, "wb");
-	AppendCString(&outFileDirectory[outPathLength], outEnumFileName);
-	FILE* outEnumFile = fopen(outFileDirectory, "wb");
-	initStructParser();
 	setOutputFile(outputFile);
 	initEnumValues();
-	printFileHeader(outputFile);
-	printMemberDefintion(outputFile);
-	printEnumeratorDefintion(outputFile);
 	LARGE_INTEGER startMarker;
 	LARGE_INTEGER endMarker;
 	QueryPerformanceCounter(&startMarker);
 	for (u32 f = 0; f < fileCount; ++f) {
-		fileStartOffsets[f] = structParser->memberCount;
+		parsingResults[f].structStart = structParser->structCount;
+		parsingResults[f].enumStart = enumParser.currentEnumerators;
 		char* file = readWholeFile(filesToParse[f]);
 		initTokenizer(file);
 		const char* fileName = filesToParse[f];
-		printDataHeader(outputFile, fileName);
 		for (;;) {
 			Token token = getToken();
 			switch (token.type) {
@@ -792,7 +771,6 @@ int main(int argCount, char** args)
 				}break;
 				case Token_Identifier: {
 					if (compareIdentifier(token, "INTROSPECT")) {
-						//printf("Match found!\n");
 						parseIntrospectable();
 					}
 				}break;
@@ -801,11 +779,32 @@ int main(int argCount, char** args)
 			}
 		}
 	fileEnd:
-		printf("End of file reached!\n");
+		parsingResults[f].structEnd = structParser->structCount;
+		parsingResults[f].enumEnd = enumParser.currentEnumerators;
+		u32 structCount = parsingResults[f].structEnd-parsingResults[f].structStart;
+		u32 enumCount = parsingResults[f].enumEnd-parsingResults[f].enumStart;
+		printf("End of file reached! Found %u structures and %u enums.\n", structCount, enumCount);
+	}
+
+	printFileHeader(outputFile);
+	writeEnumFile(outputFile);
+	printMemberDefintion(outputFile);
+	printEnumeratorDefintion(outputFile);
+
+
+	for (u32 f = 0; f < fileCount; ++f) {
+		if ((parsingResults[f].structStart!=parsingResults[f].structEnd)||(parsingResults[f].enumStart!=parsingResults[f].enumEnd)) {
+			printDataHeader(outputFile, filesToParse[f]);
+		}
+		for (u32 e = parsingResults[f].structStart; e < parsingResults[f].structEnd; ++e) {
+			//writeEnumerator Data
+		}
+		for (u32 s = parsingResults[f].structStart; s < parsingResults[f].structEnd; ++s) {
+			writeStruct(outputFile, structParser->structs[s]);
+		}
 	}
 	writeEnumeratorHelperFunction(outputFile);
 	writeFormatingFunction(outputFile);
-	writeEnumFile(outEnumFile);
 	fclose(outputFile);
 	QueryPerformanceCounter(&endMarker);
 	r64 time = ((r64)endMarker.QuadPart-(r64)startMarker.QuadPart)/(r64)clockFrequency.QuadPart;
