@@ -1,7 +1,3 @@
-//TODO:
-// - proper handling of strings, partially done~
-// - proper handling of arrays,
-
 #include "Introspect.h"
 
 #include "typedefs.h"
@@ -56,6 +52,7 @@ static char* readWholeFile(const char* fileName) {
 }
 
 typedef enum FluffyTokenType {
+	Token_Null,
 	Token_ParenOpen,
 	Token_ParenClose,
 	Token_BracketOpen,
@@ -80,6 +77,12 @@ typedef struct Token {
 	u32 length;
 	char* text;
 } Token;
+
+const Token nullToken = {
+	.length = 1,
+	.text = "0",
+	.type = Token_Null,
+};
 
 typedef struct Tokenizer {
 	char* at;
@@ -117,9 +120,10 @@ typedef struct StructData {
 typedef struct MemberData{
 	Token typeToken;
 	Token identifierToken;
+	Token value[3];
 	bool hasTypeToken;
 	bool hasIdentifierToken;
-	u32 arraySize;
+	bool hasValueToken[3];
 	MemberFlagBits flags;
 }MemberData;
 
@@ -130,6 +134,7 @@ typedef struct StructParser {
 	u16 memberCount;
 	u32 maxTypeLength;
 	u32 maxIdentifierLength;
+	u32 maxCombinedLength;
 	u32 maxArrayCountLength;
 	StructData structs[maxStructCount];
 	MemberData members[maxMemberCount];
@@ -423,13 +428,19 @@ static void parseMember() {
 	switch (token.type) {
 		case Token_Semicolon: {
 			if (structParser->members[structParser->memberCount].hasIdentifierToken&& structParser->members[structParser->memberCount].hasTypeToken) {
-				if ((structParser->members[structParser->memberCount].arraySize > 1)&&(structParser->structs[structParser->structCount].flags&MODE_BIT_TUPPLE)) {
+				if ((structParser->members[structParser->memberCount].hasValueToken[0])&&(structParser->structs[structParser->structCount].flags&MODE_BIT_TUPPLE)) {
 					structParser->members[structParser->memberCount].flags |= MEMBER_FLAG_BIT_TUPPLE;
 				}
 				pushEnumValue(structParser->members[structParser->memberCount].typeToken, (structParser->members[structParser->memberCount].flags & MEMBER_FLAG_BIT_ENUM) ? true : false);
-				structParser->maxArrayCountLength = maxU32(structParser->maxArrayCountLength, f_Log10(structParser->members[structParser->memberCount].arraySize));
+				u32 arrayDisplayLength = 0;
+				arrayDisplayLength += structParser->members[structParser->memberCount].hasValueToken[0] ? structParser->members[structParser->memberCount].value[0].length : nullToken.length;
+				arrayDisplayLength += structParser->members[structParser->memberCount].hasValueToken[1] ? structParser->members[structParser->memberCount].value[1].length : nullToken.length;
+				arrayDisplayLength += structParser->members[structParser->memberCount].hasValueToken[2] ? structParser->members[structParser->memberCount].value[2].length : nullToken.length;
+				
+				structParser->maxArrayCountLength = maxU32(structParser->maxArrayCountLength, arrayDisplayLength);
 				structParser->maxIdentifierLength = maxU32(structParser->maxIdentifierLength, structParser->members[structParser->memberCount].identifierToken.length);
 				structParser->maxTypeLength = maxU32(structParser->maxTypeLength, structParser->members[structParser->memberCount].typeToken.length);
+				structParser->maxCombinedLength = maxU32(structParser->maxCombinedLength, (structParser->members[structParser->memberCount].typeToken.length+structParser->members[structParser->memberCount].identifierToken.length));
 				++structParser->memberCount;
 			}
 		} break;
@@ -446,8 +457,21 @@ static void parseMember() {
 		}break;
 		case Token_BracketOpen: {
 			token = getToken();
-			if (token.type == Token_Number) { /*structParser->arraySize *= tokenToU32(token);*/ } //doesn't work with constants yet
-			if (!requiredToken(Token_BracketClose)) { fprintf(stderr, "Error: Invalid Array Syntax!\n\n"); }
+			if ((token.type == Token_Number)||(token.type == Token_Identifier)) {
+				if (!structParser->members[structParser->memberCount].hasValueToken[0]) {
+					structParser->members[structParser->memberCount].value[0] = token;
+					structParser->members[structParser->memberCount].hasValueToken[0] = true;
+				} else if (!structParser->members[structParser->memberCount].hasValueToken[1]) {
+					structParser->members[structParser->memberCount].value[1] = token;
+					structParser->members[structParser->memberCount].hasValueToken[1] = true;
+				} else if (!structParser->members[structParser->memberCount].hasValueToken[2]) {
+					structParser->members[structParser->memberCount].value[2] = token;
+					structParser->members[structParser->memberCount].hasValueToken[2] = true;
+				} else {
+					fprintf(stderr, "Error: Too many array dimensions.\n");
+				}
+			} //doesn't work with constants yet
+			if (!requiredToken(Token_BracketClose)) { fprintf(stderr, "Error: Invalid Array Syntax.\n\n"); }
 			parseMember();
 		}break;
 		case Token_Asterisk: {
@@ -476,20 +500,30 @@ static void parseMember() {
 
 static void writeMemberData(FILE* file, MemberData member, StructData structData) {
 	fprintf(file, "\t{%s_%.*s,", typePrefix, member.typeToken.length, member.typeToken.text);
-	for (u32 c = 0; c < maxU32(structParser->maxTypeLength, tabSize)-member.typeToken.length; ++c) {
+	for (u32 c = 0; c < structParser->maxTypeLength-member.typeToken.length; ++c) {
 		fprintf(file, " ");
 	}
 	fprintf(file, " \"%.*s\",", member.identifierToken.length, member.identifierToken.text);
-	for (u32 c = 0; c < maxU32(structParser->maxIdentifierLength, tabSize)-member.identifierToken.length; ++c) {
+	for (u32 c = 0; c < structParser->maxIdentifierLength-member.identifierToken.length; ++c) {
 		fprintf(file, " ");
 	}
-	fprintf(file, " %u,", member.arraySize);
-	for (u32 c = 0; c < maxU32(structParser->maxArrayCountLength, tabSize)-f_Log10(member.arraySize); ++c) {
+	fprintf(file, " {%.*s, %.*s, %.*s},",
+		member.hasValueToken[0] ? member.value[0].length : nullToken.length,
+		member.hasValueToken[0] ? member.value[0].text   : nullToken.text,
+		member.hasValueToken[1] ? member.value[1].length : nullToken.length,
+		member.hasValueToken[1] ? member.value[1].text   : nullToken.text,
+		member.hasValueToken[2] ? member.value[2].length : nullToken.length,
+		member.hasValueToken[2] ? member.value[2].text   : nullToken.text);
+	u32 arrayDisplayLength = 0;
+	arrayDisplayLength += member.hasValueToken[0] ? member.value[0].length : nullToken.length;
+	arrayDisplayLength += member.hasValueToken[1] ? member.value[1].length : nullToken.length;
+	arrayDisplayLength += member.hasValueToken[2] ? member.value[2].length : nullToken.length;
+	for (u32 c = 0; c < structParser->maxArrayCountLength-arrayDisplayLength; ++c) {
 		fprintf(file, " ");
 	}
 	fprintf(file, " offsetof(%.*s, %.*s),", structData.typeToken.length, structData.typeToken.text, member.identifierToken.length, member.identifierToken.text);
-	for (u32 c = 0; c < maxU32(structParser->maxIdentifierLength, tabSize)-member.identifierToken.length; ++c) {
-		fprintf(file, " ");
+	for (u32 c = 0; c < structParser->maxCombinedLength-(member.identifierToken.length+member.typeToken.length); ++c) {
+		fprintf(file, "_");
 	}
 	fprintf(file, " 0x%x },\n", member.flags);
 }
@@ -678,7 +712,7 @@ static void printMemberDefintion(FILE* file) {
 
 	fprintf(file, "typedef struct MemberDefinition {\n");
 	fprintf(file, "\t IntroDataType  type;\n");
-	fprintf(file, "\t vec3           count;\n");
+	fprintf(file, "\t uvec3          count;\n");
 	fprintf(file, "\t const char*    identifier;\n");
 	fprintf(file, "\t u64            offset;\n");
 	fprintf(file, "\t MemberFlagBits flags;\n");
@@ -694,6 +728,14 @@ static void printDataHeader(FILE* file, const char* fileName) {
 	fprintf(file, "/*===========================================================================================================================================================================\n");
 	fprintf(file, "|\n");
 	fprintf(file, "|       %s - Introspection Data\n", fileName);
+	fprintf(file, "|\n");
+	fprintf(file, "===========================================================================================================================================================================*/\n\n");
+}
+
+static void writeFunctionHeader(FILE* file) {
+	fprintf(file, "/*===========================================================================================================================================================================\n");
+	fprintf(file, "|\n");
+	fprintf(file, "|       Functions\n");
 	fprintf(file, "|\n");
 	fprintf(file, "===========================================================================================================================================================================*/\n\n");
 }
@@ -802,9 +844,9 @@ int main(int argCount, char** args)
 		r64 time = ((r64)endMarker.QuadPart-(r64)startMarker.QuadPart)/(r64)clockFrequency.QuadPart;
 		if (time<1.0f) {
 			time *= 1000.0f;
-			printf("Time taken: %.2fms\n", time);
+			printf(" Time taken: %.2fms\n", time);
 		} else {
-			printf("Time taken: %.2fs\n", time);
+			printf(" Time taken: %.2fs\n", time);
 		}
 	}
 
@@ -824,6 +866,7 @@ int main(int argCount, char** args)
 			writeStruct(outputFile, structParser->structs[s]);
 		}
 	}
+	writeFunctionHeader(outputFile);
 	writeEnumeratorHelperFunction(outputFile);
 	writeFormatingFunction(outputFile);
 	fclose(outputFile);

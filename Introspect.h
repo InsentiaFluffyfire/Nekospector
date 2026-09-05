@@ -1,7 +1,13 @@
 #pragma once
 
+//TODO:
+// - properly formatting array
+// - properly formatting the whitespace between the offsetof macro and the flags
+// - proper addition of handling strings in arrays
+
 //Supports introspecting structs, unions and enums
 //If there is a typedef then the struct name and its alias must be identical
+//Arrays can be up to two dimensional
 //All members that are structs, unions or enums must be typedefed
 //char arrays are assumed to be containers for null-terminated string
 //char pointers are assumed to point at null terminated strings
