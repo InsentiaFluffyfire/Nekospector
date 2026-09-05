@@ -13,21 +13,13 @@
 #define tabSize 8
 #define outputFileName "IntrospectionData.h"
 
-const char* basicTypeNames[] = { "char", "bool", "memIndex", "b32", "b64", "u8", "u16", "u32", "u64", "s8", "s16", "s32", "s64", "r32", "r64"};
+const char* basicTypeNames[] = { "char", "memIndex", "bool", "b32", "b64", "u8", "u16", "u32", "u64", "s8", "s16", "s32", "s64", "r32", "r64"};
 
 #define fileFilter "*.h"
 #define maxFiles 256
 char filesToParse[maxFiles][MAX_PATH];
 u8 fileCount = 0;
 u8 fileStartOffsets[maxFiles] = { 0 };
-
-static inline u32 maxU32(u32 a, u32 b) {
-	return(a > b ? a : b);
-}
-
-static inline u32 minU32(u32 a, u32 b) {
-	return(a < b ? a : b);
-}
 
 static char* readWholeFile(const char* fileName) {
 	char* fileContents = nullptr;
@@ -51,6 +43,25 @@ static char* readWholeFile(const char* fileName) {
 	return(fileContents);
 }
 
+static inline u32 maxU32(u32 a, u32 b) {
+	return(a > b ? a : b);
+}
+
+static inline u32 minU32(u32 a, u32 b) {
+	return(a < b ? a : b);
+}
+static bool compareCString(const char* s1, const char* s2) {
+	if (s1[0]&&s2[0]) {
+		u32 c = 0;
+		while (s1[c]) {
+			if (s1[c]!=s2[c]) { return(false); }
+			++c;
+		}
+		if (s2[c]=='\0') { return(true); }
+	}
+	return(false);
+	
+}
 typedef enum FluffyTokenType {
 	Token_Null,
 	Token_ParenOpen,
@@ -696,6 +707,17 @@ static void writeFormatingFunction(FILE* file) {
 }
 
 static void printFileHeader(FILE* file) {
+	SYSTEMTIME sTime;
+	SYSTEMTIME lTime;
+	GetSystemTime(&sTime);
+	GetLocalTime(&lTime);
+	fprintf(file, "/*===========================================================================================================================================================================\n");
+	fprintf(file, "|\n");
+	fprintf(file, "|       Generated on %u/%u/%u at %u:%u:%u (system)\n",sTime.wDay, sTime.wMonth, sTime.wYear, sTime.wHour, sTime.wMinute, sTime.wSecond);
+	fprintf(file, "|       Generated on %u/%u/%u at %u:%u:%u (local)\n", lTime.wDay, lTime.wMonth, lTime.wYear, lTime.wHour, lTime.wMinute, lTime.wSecond);
+	fprintf(file, "|\n");
+	fprintf(file, "===========================================================================================================================================================================*/\n\n");
+	
 	fprintf(file, "#pragma once\n\n");
 	fprintf(file, "#include \"typedefs.h\"\n");
 	fprintf(file, "#include \"utility.h\"\n");
@@ -712,8 +734,8 @@ static void printMemberDefintion(FILE* file) {
 
 	fprintf(file, "typedef struct MemberDefinition {\n");
 	fprintf(file, "\t IntroDataType  type;\n");
-	fprintf(file, "\t uvec3          count;\n");
 	fprintf(file, "\t const char*    identifier;\n");
+	fprintf(file, "\t uvec3          count;\n");
 	fprintf(file, "\t u64            offset;\n");
 	fprintf(file, "\t MemberFlagBits flags;\n");
 	fprintf(file, "} MemberDefinition;\n\n");
@@ -775,14 +797,12 @@ int main(int argCount, char** args)
 					WIN32_FIND_DATAA fileData = { 0 };
 					HANDLE searchHandle = FindFirstFileA(currentDirectory, &fileData);
 					if (searchHandle != INVALID_HANDLE_VALUE) {
-						memcpy(filesToParse[fileCount], token.text, length);
-						AppendCString(&filesToParse[fileCount][length], fileData.cFileName);
-						++fileCount;
-						while (FindNextFileA(searchHandle, &fileData)) {
+						do {
 							memcpy(filesToParse[fileCount], token.text, length);
+							if (compareCString(&fileData.cFileName, "Introspect.h")) { continue; }
 							AppendCString(&filesToParse[fileCount][length], fileData.cFileName);
 							++fileCount;
-						}
+						} while (FindNextFileA(searchHandle, &fileData));
 					}
 				}break;
 				case ArgType_OutPath: {
@@ -806,6 +826,9 @@ int main(int argCount, char** args)
 	};
 	AppendCString(&outFileDirectory[outPathLength], outFileName);
 	FILE* outputFile = fopen(outFileDirectory, "wb");
+	for (u32 f = 0; f < fileCount; ++f) {
+		printf("File: %s\n", filesToParse[f]);
+	}
 	setOutputFile(outputFile);
 	initEnumValues();
 	LARGE_INTEGER startMarker;

@@ -3,6 +3,7 @@
 //TODO:
 // - properly formatting array for display
 // - proper addition of handling strings in arrays
+// - release build fails during fileIO >.>
 
 //Supports introspecting structs, unions and enums
 //If there is a typedef then the struct name and its alias must be identical
