@@ -1,9 +1,6 @@
 //TODO:
+// - proper handling of strings, partially done~
 // - proper handling of arrays,
-// - proper handling of strings,
-// - proper printing of enum Definitions in the file
-
-
 
 #include "Introspect.h"
 
@@ -36,7 +33,7 @@ static inline u32 minU32(u32 a, u32 b) {
 	return(a < b ? a : b);
 }
 
-char* readWholeFile(const char* fileName) {
+static char* readWholeFile(const char* fileName) {
 	char* fileContents = nullptr;
 	FILE* file = fopen(fileName, "rb");
 	if (file) {
@@ -93,8 +90,7 @@ static Tokenizer tokenizer = {
 };
 
 #define maxMemberCount 65536u
-#define maxEnumeratorCount 256u
-
+#define maxEnumeratorValueCount 65536u
 typedef enum MemberFlagBits {
 	MEMBER_FLAG_BIT_NONE   = 0x0,
 	MEMBER_FLAG_BIT_PTR    = 0x1,
@@ -116,6 +112,7 @@ typedef struct StructData {
 } StructData;
 
 #define maxStructCount 256u
+#define maxEnumeratorCount 256u
 
 typedef struct MemberData{
 	Token typeToken;
@@ -144,17 +141,24 @@ typedef struct EnumeratorValue {
 	Token identifierToken;
 	s32 value;
 	bool hasIdentifierToken;
-	bool hasValue;
 }EnumeratorValue;
+
+typedef struct EnumeratorData {
+	Token typeToken;
+	u32 start;
+	u32 end;
+} EnumeratorData;
 
 typedef struct EnumParser {
 	u32 maxIdentifierLength;
 	u32 maxValueLength;
 	u32 currentEnumerators;
-	EnumeratorValue enumerators[maxEnumeratorCount];
+	u32 currentEnumeratorValues;
+	EnumeratorData enumerators[maxEnumeratorCount];
+	EnumeratorValue enumeratorValues[maxEnumeratorValueCount];
 }EnumParser;
 
-EnumParser enumParser;
+EnumParser* enumParser;
 
 typedef struct FileResults {
 	u16 structStart;
@@ -517,32 +521,31 @@ static void parseEnumerator() {
 	Token token = getToken();
 	switch (token.type) {
 		case Token_Semicolon:
+		case Token_BraceClose:
 		case Token_FileEnd: {
 		}break;
 		case Token_Number: {
 			const s32 value = tokenToS32(token);
-			enumParser.enumerators[enumParser.currentEnumerators].value = value;
-			enumParser.maxValueLength = maxU32(enumParser.maxValueLength, f_Log10(value < 0 ? -value : value)+(value < 0));
+			enumParser->enumeratorValues[enumParser->currentEnumeratorValues].value = value;
+			enumParser->maxValueLength = maxU32(enumParser->maxValueLength, f_Log10(value < 0 ? -value : value)+(value < 0));
 			if (requiredToken(Token_Comma)) {
-				++enumParser.currentEnumerators;
-				enumParser.enumerators[enumParser.currentEnumerators].hasIdentifierToken = false;
+				++enumParser->currentEnumeratorValues;
 				parseEnumerator();
 			} else {
 				fprintf(stderr, "Error: Unexpected Token: %i", token.type);
 			}
 		}break;
 		case Token_Comma: {
-			enumParser.enumerators[enumParser.currentEnumerators].value = (s32)enumParser.currentEnumerators;
-			enumParser.maxValueLength = maxU32(enumParser.maxValueLength, f_Log10(enumParser.currentEnumerators));
-			++enumParser.currentEnumerators;
-			enumParser.enumerators[enumParser.currentEnumerators].hasIdentifierToken = false;
+			enumParser->enumeratorValues[enumParser->currentEnumeratorValues].value = (s32)enumParser->currentEnumeratorValues - (s32)enumParser->enumerators[enumParser->currentEnumerators].start;
+			enumParser->maxValueLength = maxU32(enumParser->maxValueLength, f_Log10(enumParser->currentEnumerators));
+			++enumParser->currentEnumeratorValues;
 			parseEnumerator();
 		}break;
 		case Token_Identifier: {
-			if (!enumParser.enumerators[enumParser.currentEnumerators].hasIdentifierToken) {
-				enumParser.enumerators[enumParser.currentEnumerators].identifierToken = token;
-				enumParser.enumerators[enumParser.currentEnumerators].hasIdentifierToken = true;
-				enumParser.maxIdentifierLength = maxU32(enumParser.maxIdentifierLength, token.length);
+			if (!enumParser->enumeratorValues[enumParser->currentEnumeratorValues].hasIdentifierToken) {
+				enumParser->enumeratorValues[enumParser->currentEnumeratorValues].identifierToken = token;
+				enumParser->enumeratorValues[enumParser->currentEnumeratorValues].hasIdentifierToken = true;
+				enumParser->maxIdentifierLength = maxU32(enumParser->maxIdentifierLength, token.length);
 			} else {
 				fprintf(stderr, "Error: Unexpected identifier: %.*s", token.length, token.text);
 			}
@@ -553,10 +556,10 @@ static void parseEnumerator() {
 }
 static void writeEnumerator(FILE* file, EnumeratorValue e) {
 	fprintf(file, "\t{\"%.*s\",", e.identifierToken.length, e.identifierToken.text);
-	for (u32 c = 0; c < maxU32(enumParser.maxIdentifierLength, tabSize)-e.identifierToken.length; ++c) {
+	for (u32 c = 0; c < maxU32(enumParser->maxIdentifierLength, tabSize)-e.identifierToken.length; ++c) {
 		fprintf(file, " ");
 	}
-	for (u32 c = 0; c < maxU32(enumParser.maxValueLength, tabSize)-(f_Log10(e.value < 0 ? -e.value : e.value)+(e.value < 0)); ++c) {
+	for (u32 c = 0; c < maxU32(enumParser->maxValueLength, tabSize)-(f_Log10(e.value < 0 ? -e.value : e.value)+(e.value < 0)); ++c) {
 		fprintf(file, " ");
 	}
 	fprintf(file, "%i", e.value);
@@ -564,20 +567,22 @@ static void writeEnumerator(FILE* file, EnumeratorValue e) {
 }
 
 static void parseEnum() {
-	enumParser.maxIdentifierLength = 0;
-	enumParser.maxValueLength = 1;
-	enumParser.currentEnumerators = 0;
 	Token nameToken = getToken();
+	enumParser->enumerators[enumParser->currentEnumerators].typeToken = nameToken;
+	enumParser->enumerators[enumParser->currentEnumerators].start = enumParser->currentEnumeratorValues;
 	pushEnumValue(nameToken, true);
-	fprintf(structParser->outputFile, "EnumeratorDefinition enumeratorsOf_%.*s[] = {\n", nameToken.length, nameToken.text);
 	if (requiredToken(Token_BraceOpen)) {
 		parseEnumerator();
 	}
-	for (u32 e = 0; e < enumParser.currentEnumerators; ++e) {
-		writeEnumerator(structParser->outputFile, enumParser.enumerators[e]);
+	enumParser->enumerators[enumParser->currentEnumerators].end = enumParser->currentEnumeratorValues;
+	++enumParser->currentEnumerators;
+}
+
+static void writeEnum(FILE* file, EnumeratorData enumerator) {
+	fprintf(structParser->outputFile, "EnumeratorDefinition enumeratorsOf_%.*s[] = {\n", enumerator.typeToken.length, enumerator.typeToken.text);
+	for (u32 e = enumerator.start; e < enumerator.end; ++e) {
+		writeEnumerator(structParser->outputFile, enumParser->enumeratorValues[e]);
 	}
-	enumParser.currentEnumerators = 0;
-	enumParser.enumerators[0].hasIdentifierToken = false;
 	fprintf(structParser->outputFile, "};\n\n");
 }
 
@@ -629,8 +634,15 @@ static void writeFormatingFunction(FILE* file) {
 	fprintf(file, "\t\t\t}\n");
 	fprintf(file, "\t\telse {\n");
 	fprintf(file, "\t\t\tswitch(memberDefinitions[m].type); {\n");
+	
+	fprintf(file, "\n\t\t\t//Strings and chars:\n");
+	fprintf(file, "\t\t\t\tcase %s_char: {\n", typePrefix);
+	fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { AppendCString(&buffer[currentBufferPos], *(char**)member);}\n");
+	
+	fprintf(file, "\t\t\t\t}break;\n");
+	
 	fprintf(file, "\n\t\t\t//Basic types:\n");
-	for (u32 i = 0; i< ArrayCount(basicTypeNames); ++i) {
+	for (u32 i = 1; i< ArrayCount(basicTypeNames); ++i) {
 		fprintf(file, "\t\t\t\tcase %s_%s: {\n", typePrefix, enumValues[i].name);
 		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { %sToChars(&buffer[currentBufferPos], **(%s**)member);}\n", enumValues[i].name, enumValues[i].name);
 		fprintf(file, "\t\t\t\t\telse { %sToChars(&buffer[currentBufferPos], *(%s*)member);}\n", enumValues[i].name, enumValues[i].name);
@@ -666,7 +678,7 @@ static void printMemberDefintion(FILE* file) {
 
 	fprintf(file, "typedef struct MemberDefinition {\n");
 	fprintf(file, "\t IntroDataType  type;\n");
-	fprintf(file, "\t u32            count;\n");
+	fprintf(file, "\t vec3           count;\n");
 	fprintf(file, "\t const char*    identifier;\n");
 	fprintf(file, "\t u64            offset;\n");
 	fprintf(file, "\t MemberFlagBits flags;\n");
@@ -703,6 +715,8 @@ int main(int argCount, char** args)
 	u32 outPathLength = 0;
 	structParser = malloc(sizeof(StructParser));
 	memset(structParser, 0, sizeof(StructParser));
+	enumParser = malloc(sizeof(EnumParser));
+	memset(enumParser, 0, sizeof(EnumParser));
 	if (argCount>1) {
 		CurrentArgType argType = ArgType_None;
 		for (u32 a = 1; a < argCount; ++a) {
@@ -754,10 +768,10 @@ int main(int argCount, char** args)
 	initEnumValues();
 	LARGE_INTEGER startMarker;
 	LARGE_INTEGER endMarker;
-	QueryPerformanceCounter(&startMarker);
 	for (u32 f = 0; f < fileCount; ++f) {
+		QueryPerformanceCounter(&startMarker);
 		parsingResults[f].structStart = structParser->structCount;
-		parsingResults[f].enumStart = enumParser.currentEnumerators;
+		parsingResults[f].enumStart = enumParser->currentEnumerators;
 		char* file = readWholeFile(filesToParse[f]);
 		initTokenizer(file);
 		const char* fileName = filesToParse[f];
@@ -780,10 +794,18 @@ int main(int argCount, char** args)
 		}
 	fileEnd:
 		parsingResults[f].structEnd = structParser->structCount;
-		parsingResults[f].enumEnd = enumParser.currentEnumerators;
+		parsingResults[f].enumEnd = enumParser->currentEnumerators;
 		u32 structCount = parsingResults[f].structEnd-parsingResults[f].structStart;
 		u32 enumCount = parsingResults[f].enumEnd-parsingResults[f].enumStart;
-		printf("End of file reached! Found %u structures and %u enums.\n", structCount, enumCount);
+		QueryPerformanceCounter(&endMarker);
+		printf("Found %u structures and %u enums.", structCount, enumCount);
+		r64 time = ((r64)endMarker.QuadPart-(r64)startMarker.QuadPart)/(r64)clockFrequency.QuadPart;
+		if (time<1.0f) {
+			time *= 1000.0f;
+			printf("Time taken: %.2fms\n", time);
+		} else {
+			printf("Time taken: %.2fs\n", time);
+		}
 	}
 
 	printFileHeader(outputFile);
@@ -791,13 +813,12 @@ int main(int argCount, char** args)
 	printMemberDefintion(outputFile);
 	printEnumeratorDefintion(outputFile);
 
-
 	for (u32 f = 0; f < fileCount; ++f) {
 		if ((parsingResults[f].structStart!=parsingResults[f].structEnd)||(parsingResults[f].enumStart!=parsingResults[f].enumEnd)) {
 			printDataHeader(outputFile, filesToParse[f]);
 		}
-		for (u32 e = parsingResults[f].structStart; e < parsingResults[f].structEnd; ++e) {
-			//writeEnumerator Data
+		for (u32 e = parsingResults[f].enumStart; e < parsingResults[f].enumEnd; ++e) {
+			writeEnum(outputFile, enumParser->enumerators[e]);
 		}
 		for (u32 s = parsingResults[f].structStart; s < parsingResults[f].structEnd; ++s) {
 			writeStruct(outputFile, structParser->structs[s]);
@@ -806,12 +827,4 @@ int main(int argCount, char** args)
 	writeEnumeratorHelperFunction(outputFile);
 	writeFormatingFunction(outputFile);
 	fclose(outputFile);
-	QueryPerformanceCounter(&endMarker);
-	r64 time = ((r64)endMarker.QuadPart-(r64)startMarker.QuadPart)/(r64)clockFrequency.QuadPart;
-	if (time<1.0f) {
-		time *= 1000.0f;
-		printf("Time taken: %.2fms\n\n", time);
-	} else {
-		printf("Time taken: %.2fs\n\n", time);
-	}
 }
