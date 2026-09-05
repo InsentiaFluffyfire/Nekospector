@@ -1,8 +1,7 @@
 #pragma once
 
 //TODO:
-// - properly formatting array
-// - properly formatting the whitespace between the offsetof macro and the flags
+// - properly formatting array for display
 // - proper addition of handling strings in arrays
 
 //Supports introspecting structs, unions and enums

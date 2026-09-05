@@ -440,7 +440,7 @@ static void parseMember() {
 				structParser->maxArrayCountLength = maxU32(structParser->maxArrayCountLength, arrayDisplayLength);
 				structParser->maxIdentifierLength = maxU32(structParser->maxIdentifierLength, structParser->members[structParser->memberCount].identifierToken.length);
 				structParser->maxTypeLength = maxU32(structParser->maxTypeLength, structParser->members[structParser->memberCount].typeToken.length);
-				structParser->maxCombinedLength = maxU32(structParser->maxCombinedLength, (structParser->members[structParser->memberCount].typeToken.length+structParser->members[structParser->memberCount].identifierToken.length));
+				structParser->maxCombinedLength = maxU32(structParser->maxCombinedLength, (structParser->structs[structParser->structCount].typeToken.length+structParser->members[structParser->memberCount].identifierToken.length));
 				++structParser->memberCount;
 			}
 		} break;
@@ -522,8 +522,8 @@ static void writeMemberData(FILE* file, MemberData member, StructData structData
 		fprintf(file, " ");
 	}
 	fprintf(file, " offsetof(%.*s, %.*s),", structData.typeToken.length, structData.typeToken.text, member.identifierToken.length, member.identifierToken.text);
-	for (u32 c = 0; c < structParser->maxCombinedLength-(member.identifierToken.length+member.typeToken.length); ++c) {
-		fprintf(file, "_");
+	for (u32 c = 0; c < structParser->maxCombinedLength-(member.identifierToken.length+structData.typeToken.length); ++c) {
+		fprintf(file, " ");
 	}
 	fprintf(file, " 0x%x },\n", member.flags);
 }
