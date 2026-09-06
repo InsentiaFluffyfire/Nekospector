@@ -33,9 +33,9 @@ static inline u32 f_Log10(const u64 number) {
 		if (number >=1000000000000) { //13 digits or more
 			if (number >=10000000000000000) { //17 to 20 digits
 				if (number >=1000000000000000000) {
-					ret = (number >= 10000000000000000000) ? 20 : 19;
+					ret = (number >= 10000000000000000000ull) ? 20 : 19;
 				} else {
-					ret = number >= 100000000000000000 ? 18 : 17;
+					ret = number >= 100000000000000000ull ? 18 : 17;
 				}
 			} else { //13 to 16 digits
 				if (number>=100000000000000) {

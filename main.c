@@ -29,9 +29,10 @@ static char* readWholeFile(const char* fileName) {
 		u64 fileSize = ftell(file);
 		fseek(file, 0, SEEK_SET);
 
-		fileContents = (char*)malloc(fileSize);
+		fileContents = (char*)malloc(fileSize+1);
+		printf("File Contents: 0x%X, fileSize: %u\n", fileContents, fileSize);
 		if (fileContents) {
-			fread(fileContents, fileSize, 1, file);
+			fread(fileContents, 1, fileSize, file);
 			fileContents[fileSize] = 0;
 			fclose(file);
 		} else {
@@ -190,7 +191,7 @@ static void setOutputFile(FILE* file) {
 }
 
 //sets which file the tokenizer will process
-static inline initTokenizer(char* file) {
+static inline void initTokenizer(char* file) {
 	tokenizer.at = file;
 }
 
@@ -656,7 +657,7 @@ static void writeEnumeratorHelperFunction(FILE* file) {
 	fprintf(file, "\nstatic const char* findEnumString_(EnumeratorDefinition* enumDefinition, u32 size, s32* value) {\n");
 	fprintf(file, "\tu32 v = 0;\n");
 	fprintf(file, "\t\t for(u32 v = 0; v < size; ++v) {\n");
-	fprintf(file, "\t\t\t if(enumDefintion[v].value == *value) {return(enumDefintion[v].identifier);}\n");
+	fprintf(file, "\t\t\t if(enumDefinition[v].value == *value) {return(enumDefinition[v].identifier);}\n");
 	fprintf(file, "\t\t}\n");
 	fprintf(file, "\treturn(v);\n");
 	fprintf(file, "}\n\n");
@@ -669,16 +670,16 @@ static void writeFormatingFunction(FILE* file) {
 	fprintf(file, "\tfor (u32 m = 0; m<memberCount; ++m) {\n");
 	fprintf(file, "\t\tvoid* member = (void*)((u8*) displayable + memberDefinitions[m].offset);\n");
 	fprintf(file, "\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_ENUM) {\n");
-	fprintf(file, "\t\t\tswitch(memberDefinitions[m].type); {\n");
+	fprintf(file, "\t\t\tswitch(memberDefinitions[m].type) {\n");
 	for (u32 i = 0; i < currentEnumValuesE; ++i) {
 		fprintf(file, "\t\t\t\tcase %s_%s: {\n", typePrefix, enumValuesE[i].name);
-		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { AppendCString(buffer, findEnumString(%s), *member);}\n", enumValuesE[i].name);
-		fprintf(file, "\t\t\t\t\telse {AppendCString(buffer, findEnumString(%s), member);}\n", enumValuesE[i].name);
+		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { AppendCString(buffer, findEnumString(%s, *(char**)member));}\n", enumValuesE[i].name);
+		fprintf(file, "\t\t\t\t\telse {AppendCString(buffer, findEnumString(%s, member));}\n", enumValuesE[i].name);
 		fprintf(file, "\t\t\t\t}break;\n");
 	}
 	fprintf(file, "\t\t\t}\n");
-	fprintf(file, "\t\telse {\n");
-	fprintf(file, "\t\t\tswitch(memberDefinitions[m].type); {\n");
+	fprintf(file, "\t\t} else {\n");
+	fprintf(file, "\t\t\tswitch(memberDefinitions[m].type) {\n");
 	
 	fprintf(file, "\n\t\t\t//Strings and chars:\n");
 	fprintf(file, "\t\t\t\tcase %s_char: {\n", typePrefix);
@@ -687,16 +688,22 @@ static void writeFormatingFunction(FILE* file) {
 	fprintf(file, "\t\t\t\t}break;\n");
 	
 	fprintf(file, "\n\t\t\t//Basic types:\n");
-	for (u32 i = 1; i< ArrayCount(basicTypeNames); ++i) {
+	for (u32 i = 1; i< ArrayCount(basicTypeNames)-2; ++i) {
 		fprintf(file, "\t\t\t\tcase %s_%s: {\n", typePrefix, enumValues[i].name);
 		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { %sToChars(&buffer[currentBufferPos], **(%s**)member);}\n", enumValues[i].name, enumValues[i].name);
 		fprintf(file, "\t\t\t\t\telse { %sToChars(&buffer[currentBufferPos], *(%s*)member);}\n", enumValues[i].name, enumValues[i].name);
 		fprintf(file, "\t\t\t\t}break;\n");
 	}
+	for (u32 i = ArrayCount(basicTypeNames)-2; i< ArrayCount(basicTypeNames); ++i) {
+		fprintf(file, "\t\t\t\tcase %s_%s: {\n", typePrefix, enumValues[i].name);
+		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { %sToChars(&buffer[currentBufferPos], **(%s**)member, 5);}\n", enumValues[i].name, enumValues[i].name);
+		fprintf(file, "\t\t\t\t\telse { %sToChars(&buffer[currentBufferPos], *(%s*)member, 5);}\n", enumValues[i].name, enumValues[i].name);
+		fprintf(file, "\t\t\t\t}break;\n");
+	}
 	fprintf(file, "\n\t\t\t//Custom types:\n");
 	for (u32 i = ArrayCount(basicTypeNames); i <currentEnumValues; ++i) {
 		fprintf(file, "\t\t\t\tcase %s_%s: {\n", typePrefix, enumValues[i].name);
-		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { DEBUG_dumpMembers(buffer, currentBufferPos, %s, *member); }\n", enumValues[i].name);
+		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { DEBUG_dumpMembers(buffer, currentBufferPos, %s, member); }\n", enumValues[i].name);
 		fprintf(file, "\t\t\t\t\telse { DEBUG_dumpMembers(buffer, currentBufferPos, %s, member); }\n", enumValues[i].name);
 		fprintf(file, "\t\t\t\t}break;\n");
 	}
