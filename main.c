@@ -664,17 +664,21 @@ static void writeEnumeratorHelperFunction(FILE* file) {
 }
 
 static void writeFormatingFunction(FILE* file) {
-	fprintf(file, "static void DEBUG_dumpMembers_(char* buffer, u32 bufferSize, u32 currentBufferPos, MemberDefinition* memberDefinitions, u32 memberCount, void* displayable);\n");
+	fprintf(file, "static void DEBUG_dumpMembers_(char* buffer, u32 bufferSize, u32* currentBufferPos, MemberDefinition* memberDefinitions, u32 memberCount, void* displayable);\n");
 	fprintf(file, "#define DEBUG_dumpMembers(buffer, bufferPos, type, ptr_displayable) DEBUG_dumpMembers_(buffer, ArrayCount(buffer), bufferPos, membersOf_##type, ArrayCount(membersOf_##type), ptr_displayable)\n");
-	fprintf(file, "\nstatic void DEBUG_dumpMembers_(char* buffer, u32 bufferSize, u32 currentBufferPos, MemberDefinition* memberDefinitions, u32 memberCount, void* displayable) {\n");
+	fprintf(file, "\nstatic void DEBUG_dumpMembers_(char* buffer, u32 bufferSize, u32* currentBufferPos, MemberDefinition* memberDefinitions, u32 memberCount, void* displayable) {\n");
 	fprintf(file, "\tfor (u32 m = 0; m<memberCount; ++m) {\n");
 	fprintf(file, "\t\tvoid* member = (void*)((u8*) displayable + memberDefinitions[m].offset);\n");
 	fprintf(file, "\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_ENUM) {\n");
 	fprintf(file, "\t\t\tswitch(memberDefinitions[m].type) {\n");
 	for (u32 i = 0; i < currentEnumValuesE; ++i) {
 		fprintf(file, "\t\t\t\tcase %s_%s: {\n", typePrefix, enumValuesE[i].name);
-		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { AppendCString(buffer, findEnumString(%s, *(char**)member));}\n", enumValuesE[i].name);
-		fprintf(file, "\t\t\t\t\telse {AppendCString(buffer, findEnumString(%s, member));}\n", enumValuesE[i].name);
+		fprintf(file, "\t\t\t\t\t*currentBufferPos += AppendCString(&buffer[*currentBufferPos], memberDefinitions[m].identifier);\n");
+		fprintf(file, "\t\t\t\t\t*currentBufferPos += AppendCString(&buffer[*currentBufferPos], \": \");\n");
+		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { *currentBufferPos += AppendCString(buffer, findEnumString(%s, *(char**)member));}\n", enumValuesE[i].name);
+		fprintf(file, "\t\t\t\t\telse {*currentBufferPos += AppendCString(buffer, findEnumString(%s, member));}\n", enumValuesE[i].name);
+		fprintf(file, "\t\t\t\t\tbuffer[*currentBufferPos] = '\\n';\n");
+		fprintf(file, "\t\t\t\t\t++*currentBufferPos;\n");
 		fprintf(file, "\t\t\t\t}break;\n");
 	}
 	fprintf(file, "\t\t\t}\n");
@@ -683,26 +687,39 @@ static void writeFormatingFunction(FILE* file) {
 	
 	fprintf(file, "\n\t\t\t//Strings and chars:\n");
 	fprintf(file, "\t\t\t\tcase %s_char: {\n", typePrefix);
-	fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { AppendCString(&buffer[currentBufferPos], *(char**)member);}\n");
-	
+	fprintf(file, "\t\t\t\t\t*currentBufferPos += AppendCString(&buffer[*currentBufferPos], memberDefinitions[m].identifier);\n");
+	fprintf(file, "\t\t\t\t\t*currentBufferPos += AppendCString(&buffer[*currentBufferPos], \": \");\n");
+	fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { *currentBufferPos += AppendCString(&buffer[*currentBufferPos], *(char**)member);}\n");
+	fprintf(file, "\t\t\t\t\tbuffer[*currentBufferPos] = '\\n';\n");
+	fprintf(file, "\t\t\t\t\t++*currentBufferPos;\n");
 	fprintf(file, "\t\t\t\t}break;\n");
 	
 	fprintf(file, "\n\t\t\t//Basic types:\n");
 	for (u32 i = 1; i< ArrayCount(basicTypeNames)-2; ++i) {
 		fprintf(file, "\t\t\t\tcase %s_%s: {\n", typePrefix, enumValues[i].name);
-		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { %sToChars(&buffer[currentBufferPos], **(%s**)member);}\n", enumValues[i].name, enumValues[i].name);
-		fprintf(file, "\t\t\t\t\telse { %sToChars(&buffer[currentBufferPos], *(%s*)member);}\n", enumValues[i].name, enumValues[i].name);
+		fprintf(file, "\t\t\t\t\t*currentBufferPos += AppendCString(&buffer[*currentBufferPos], memberDefinitions[m].identifier);\n");
+		fprintf(file, "\t\t\t\t\t*currentBufferPos += AppendCString(&buffer[*currentBufferPos], \": \");\n");
+		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { *currentBufferPos += %sToChars(&buffer[*currentBufferPos], **(%s**)member);}\n", enumValues[i].name, enumValues[i].name);
+		fprintf(file, "\t\t\t\t\telse { *currentBufferPos += %sToChars(&buffer[*currentBufferPos], *(%s*)member);}\n", enumValues[i].name, enumValues[i].name);
+		fprintf(file, "\t\t\t\t\tbuffer[*currentBufferPos] = '\\n';\n");
+		fprintf(file, "\t\t\t\t\t++*currentBufferPos;\n");
 		fprintf(file, "\t\t\t\t}break;\n");
 	}
 	for (u32 i = ArrayCount(basicTypeNames)-2; i< ArrayCount(basicTypeNames); ++i) {
 		fprintf(file, "\t\t\t\tcase %s_%s: {\n", typePrefix, enumValues[i].name);
-		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { %sToChars(&buffer[currentBufferPos], **(%s**)member, 5);}\n", enumValues[i].name, enumValues[i].name);
-		fprintf(file, "\t\t\t\t\telse { %sToChars(&buffer[currentBufferPos], *(%s*)member, 5);}\n", enumValues[i].name, enumValues[i].name);
+		fprintf(file, "\t\t\t\t\t*currentBufferPos += AppendCString(&buffer[*currentBufferPos], memberDefinitions[m].identifier);\n");
+		fprintf(file, "\t\t\t\t\t*currentBufferPos += AppendCString(&buffer[*currentBufferPos], \": \");\n");
+		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { *currentBufferPos += %sToChars(&buffer[*currentBufferPos], **(%s**)member, 5);}\n", enumValues[i].name, enumValues[i].name);
+		fprintf(file, "\t\t\t\t\telse { *currentBufferPos += %sToChars(&buffer[*currentBufferPos], *(%s*)member, 5);}\n", enumValues[i].name, enumValues[i].name);
+		fprintf(file, "\t\t\t\t\tbuffer[*currentBufferPos] = '\\n';\n");
+		fprintf(file, "\t\t\t\t\t++*currentBufferPos;\n");
 		fprintf(file, "\t\t\t\t}break;\n");
 	}
 	fprintf(file, "\n\t\t\t//Custom types:\n");
 	for (u32 i = ArrayCount(basicTypeNames); i <currentEnumValues; ++i) {
 		fprintf(file, "\t\t\t\tcase %s_%s: {\n", typePrefix, enumValues[i].name);
+		fprintf(file, "\t\t\t\t\t*currentBufferPos += AppendCString(&buffer[*currentBufferPos], memberDefinitions[m].identifier);\n");
+		fprintf(file, "\t\t\t\t\t*currentBufferPos += AppendCString(&buffer[*currentBufferPos], \": \");\n");
 		fprintf(file, "\t\t\t\t\tif (memberDefinitions[m].flags & MEMBER_FLAG_BIT_PTR) { DEBUG_dumpMembers(buffer, currentBufferPos, %s, member); }\n", enumValues[i].name);
 		fprintf(file, "\t\t\t\t\telse { DEBUG_dumpMembers(buffer, currentBufferPos, %s, member); }\n", enumValues[i].name);
 		fprintf(file, "\t\t\t\t}break;\n");
@@ -710,6 +727,7 @@ static void writeFormatingFunction(FILE* file) {
 	fprintf(file, "\t\t\t}\n");
 	fprintf(file, "\t\t}\n");
 	fprintf(file, "\t}\n");
+	fprintf(file, "buffer[*currentBufferPos] = '\\0';\n ++*currentBufferPos;\n");
 	fprintf(file, "}\n");
 }
 
